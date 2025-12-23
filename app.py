@@ -2,7 +2,7 @@ import streamlit as st
 import anthropic
 import os
 from dotenv import load_dotenv
-import mysql.connector
+import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
@@ -42,13 +42,7 @@ if "demo_mode" not in st.session_state:
 def query_database(query):
     """Execute SQL query and return results"""
     try:
-        conn = mysql.connector.connect(
-            host=os.getenv('MYSQL_HOST', 'localhost'),
-            port=int(os.getenv('MYSQL_PORT', 3306)),
-            user=os.getenv('MYSQL_USER', 'root'),
-            password=os.getenv('MYSQL_PASSWORD'),
-            database=os.getenv('MYSQL_DATABASE', 'revenue_ops')
-        )
+        conn = sqlite3.connect('revenue_data.db')
         cursor = conn.cursor()
         cursor.execute(query)
         results = cursor.fetchall()
@@ -422,13 +416,7 @@ with st.sidebar:
     
     if st.button(f"💰 Close {multiplier} x $50K Deals", use_container_width=True):
         try:
-            conn = mysql.connector.connect(
-                host=os.getenv('MYSQL_HOST', 'localhost'),
-                port=int(os.getenv('MYSQL_PORT', 3306)),
-                user=os.getenv('MYSQL_USER', 'root'),
-                password=os.getenv('MYSQL_PASSWORD'),
-                database=os.getenv('MYSQL_DATABASE', 'revenue_ops')
-            )
+            conn = sqlite3.connect('revenue_data.db')
             cursor = conn.cursor()
             
             cursor.execute(f"SELECT opportunity_id FROM sales_pipeline WHERE deal_stage = 'Engaging' LIMIT {multiplier}")
@@ -438,8 +426,8 @@ with st.sidebar:
                 for (opp_id,) in results:
                     cursor.execute("""
                         UPDATE sales_pipeline 
-                        SET deal_stage = 'Won', close_value = 50000, close_date = CURDATE()
-                        WHERE opportunity_id = %s
+                        SET deal_stage = 'Won', close_value = 50000, close_date = date('now')
+                        WHERE opportunity_id = ?
                     """, (opp_id,))
                 
                 conn.commit()
@@ -453,13 +441,7 @@ with st.sidebar:
     
     if st.button(f"❌ Mark {multiplier} Deals as Lost", use_container_width=True):
         try:
-            conn = mysql.connector.connect(
-                host=os.getenv('MYSQL_HOST', 'localhost'),
-                port=int(os.getenv('MYSQL_PORT', 3306)),
-                user=os.getenv('MYSQL_USER', 'root'),
-                password=os.getenv('MYSQL_PASSWORD'),
-                database=os.getenv('MYSQL_DATABASE', 'revenue_ops')
-            )
+            conn = sqlite3.connect('revenue_data.db')
             cursor = conn.cursor()
             
             cursor.execute(f"SELECT opportunity_id FROM sales_pipeline WHERE deal_stage = 'Engaging' LIMIT {multiplier}")
@@ -467,7 +449,7 @@ with st.sidebar:
             
             if results:
                 for (opp_id,) in results:
-                    cursor.execute("UPDATE sales_pipeline SET deal_stage = 'Lost', close_date = CURDATE() WHERE opportunity_id = %s", (opp_id,))
+                    cursor.execute("UPDATE sales_pipeline SET deal_stage = 'Lost', close_date = date('now') WHERE opportunity_id = ?", (opp_id,))
                 
                 conn.commit()
                 st.warning(f"Marked {len(results)} deals as lost")
@@ -482,13 +464,7 @@ with st.sidebar:
             import random
             import string
             
-            conn = mysql.connector.connect(
-                host=os.getenv('MYSQL_HOST', 'localhost'),
-                port=int(os.getenv('MYSQL_PORT', 3306)),
-                user=os.getenv('MYSQL_USER', 'root'),
-                password=os.getenv('MYSQL_PASSWORD'),
-                database=os.getenv('MYSQL_DATABASE', 'revenue_ops')
-            )
+            conn = sqlite3.connect('revenue_data.db')
             cursor = conn.cursor()
             
             cursor.execute("SELECT DISTINCT sales_agent FROM sales_pipeline")
@@ -501,7 +477,7 @@ with st.sidebar:
                 cursor.execute("""
                     INSERT INTO sales_pipeline 
                     (opportunity_id, sales_agent, product, account, deal_stage, engage_date, close_date, close_value)
-                    VALUES (%s, %s, 'GTXPro', 'New Demo Account', 'Engaging', CURDATE(), NULL, 75000)
+                    VALUES (?, ?, 'GTXPro', 'New Demo Account', 'Engaging', date('now'), NULL, 75000)
                 """, (opp_id, agent))
             
             conn.commit()

@@ -35,6 +35,12 @@ if "messages" not in st.session_state:
 if "demo_mode" not in st.session_state:
     st.session_state.demo_mode = True
 
+if "live_mode_authenticated" not in st.session_state:
+    st.session_state.live_mode_authenticated = False
+
+if "live_mode_questions" not in st.session_state:
+    st.session_state.live_mode_questions = 0
+
 # ============================================
 # HELPER FUNCTIONS (defined first)
 # ============================================
@@ -360,21 +366,26 @@ for message in st.session_state.messages:
             st.markdown(message["content"])
 
 if prompt := st.chat_input("Ask a question about your revenue data..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
-    with st.chat_message("assistant", avatar="avatar.png"):
-        with st.spinner("Analyzing..."):
-            if st.session_state.demo_mode:
-                response = get_demo_response(prompt)
-            else:
-                response = get_claude_response(prompt)
+    # Check Live Mode question limit
+    if not st.session_state.demo_mode and st.session_state.live_mode_questions >= 5:
+        st.error("🚫 You've reached the 5-question limit for Live Mode. Please switch to Demo Mode.")
+    else:
+        st.session_state.messages.append({"role": "user", "content": prompt})
         
-        st.markdown(response)
-    
-    st.session_state.messages.append({"role": "assistant", "content": response})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        with st.chat_message("assistant", avatar="avatar.png"):
+            with st.spinner("Analyzing..."):
+                if st.session_state.demo_mode:
+                    response = get_demo_response(prompt)
+                else:
+                    response = get_claude_response(prompt)
+                    st.session_state.live_mode_questions += 1
+            
+            st.markdown(response)
+        
+        st.session_state.messages.append({"role": "assistant", "content": response})
 
 # Sidebar
 with st.sidebar:
@@ -399,12 +410,32 @@ with st.sidebar:
         ["Demo (Free)", "Live API (Costs $)"],
         index=0 if st.session_state.demo_mode else 1
     )
-    st.session_state.demo_mode = (mode == "Demo (Free)")
+    
+    # Handle mode switching with password protection for Live Mode
+    if mode == "Live API (Costs $)" and not st.session_state.live_mode_authenticated:
+        password = st.text_input("Enter password for Live Mode:", type="password")
+        if st.button("Unlock Live Mode"):
+            if password == os.getenv("LIVE_MODE_PASSWORD", "recruiter2025"):
+                st.session_state.live_mode_authenticated = True
+                st.session_state.demo_mode = False
+                st.success("✅ Live Mode unlocked!")
+                st.rerun()
+            else:
+                st.error("❌ Incorrect password")
+    elif mode == "Demo (Free)":
+        st.session_state.demo_mode = True
+        st.session_state.live_mode_authenticated = False
+        st.session_state.live_mode_questions = 0
     
     if st.session_state.demo_mode:
         st.success("💰 Demo Mode - No API costs")
     else:
-        st.warning("💸 Live Mode - Using API credits")
+        remaining = 5 - st.session_state.live_mode_questions
+        if remaining > 0:
+            st.warning(f"💸 Live Mode - {remaining} questions remaining")
+        else:
+            st.error("🚫 Question limit reached. Switch to Demo Mode.")
+            st.session_state.demo_mode = True
     
     st.divider()
     

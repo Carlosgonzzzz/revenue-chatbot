@@ -184,25 +184,81 @@ def get_demo_response(prompt):
         return f"**Try asking about:**\n• Pipeline value and open deals\n• Win rates and conversion\n• Top sales reps\n• Product performance\n• Sales cycle velocity\n• Revenue forecasting"
 
 def get_claude_response(prompt):
-    """Calls Claude API for real intelligence"""
+    """Calls Claude API with database access to answer complex queries"""
     try:
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             return "❌ API key not found."
         
+        # Get database schema
+        schema_info = """
+        Database: sales_pipeline table with 8,800+ B2B deals
+        Columns:
+        - opportunity_id (TEXT): Unique deal ID
+        - sales_agent (TEXT): Sales rep name
+        - product (TEXT): Product name (GTX Basic, GTX Plus Basic, GTXPro, MG Special, MG Advanced)
+        - account (TEXT): Customer company name
+        - deal_stage (TEXT): 'Won', 'Lost', or 'Engaging'
+        - engage_date (DATE): When deal started
+        - close_date (DATE): When deal closed (NULL if still open)
+        - close_value (INTEGER): Deal value in dollars
+        
+        Use SQLite syntax. Use JULIANDAY() for date math.
+        """
+        
         client = anthropic.Anthropic(api_key=api_key)
         
-        system_prompt = """You are a Revenue Operations analyst. Help sales leaders analyze pipeline, 
-        forecast deals, and make data-driven decisions. Keep responses concise and actionable."""
+        system_prompt = f"""You are a Revenue Operations analyst with access to a sales database.
+
+{schema_info}
+
+When the user asks a question:
+1. Generate a SQL query to answer it
+2. I will execute the query and give you results
+3. Analyze the results and provide insights
+
+Format your SQL query in <sql></sql> tags.
+After seeing results, provide business insights and recommendations."""
         
+        # First, ask Claude to generate SQL
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=300,
+            max_tokens=1000,
             system=system_prompt,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": f"Question: {prompt}\n\nGenerate a SQL query to answer this."}]
         )
         
-        return message.content[0].text
+        response_text = message.content[0].text
+        
+        # Extract SQL from response
+        import re
+        sql_match = re.search(r'<sql>(.*?)</sql>', response_text, re.DOTALL)
+        
+        if sql_match:
+            sql_query = sql_match.group(1).strip()
+            
+            # Execute the query
+            results = query_database(sql_query)
+            
+            if results:
+                # Send results back to Claude for analysis
+                message2 = client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=1000,
+                    system=system_prompt,
+                    messages=[
+                        {"role": "user", "content": f"Question: {prompt}\n\nGenerate a SQL query to answer this."},
+                        {"role": "assistant", "content": response_text},
+                        {"role": "user", "content": f"Query results:\n{results[:20]}\n\nAnalyze these results and provide business insights."}
+                    ]
+                )
+                
+                return message2.content[0].text
+            else:
+                return "❌ Query returned no results. Try rephrasing your question."
+        else:
+            # No SQL generated, return Claude's direct response
+            return response_text
         
     except Exception as e:
         return f"❌ Error: {str(e)}"

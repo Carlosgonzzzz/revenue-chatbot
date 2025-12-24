@@ -196,68 +196,71 @@ def get_claude_response(prompt):
         Columns:
         - opportunity_id (TEXT): Unique deal ID
         - sales_agent (TEXT): Sales rep name
-        - product (TEXT): Product name (GTX Basic, GTX Plus Basic, GTXPro, MG Special, MG Advanced)
+        - product (TEXT): Product names
         - account (TEXT): Customer company name
         - deal_stage (TEXT): 'Won', 'Lost', or 'Engaging'
         - engage_date (DATE): When deal started
         - close_date (DATE): When deal closed (NULL if still open)
         - close_value (INTEGER): Deal value in dollars
         
-        Use SQLite syntax. Use JULIANDAY() for date math.
+        SQLite syntax. Use JULIANDAY() for date calculations.
         """
         
         client = anthropic.Anthropic(api_key=api_key)
         
-        system_prompt = f"""You are a Revenue Operations analyst with access to a sales database.
+        system_prompt = f"""You are a Revenue Operations analyst with direct database access.
 
 {schema_info}
 
-When the user asks a question:
-1. Generate a SQL query to answer it
-2. I will execute the query and give you results
-3. Analyze the results and provide insights
+When answering questions:
+1. Write a SQL query to get the data
+2. Analyze the results
+3. Provide executive-level insights and recommendations
 
-Format your SQL query in <sql></sql> tags.
-After seeing results, provide business insights and recommendations."""
+Put your SQL in <sql></sql> tags. I'll execute it and give you results.
+Then provide ONLY business insights - no SQL in your final response."""
         
-        # First, ask Claude to generate SQL
+        # First: Get SQL query from Claude
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1000,
             system=system_prompt,
-            messages=[{"role": "user", "content": f"Question: {prompt}\n\nGenerate a SQL query to answer this."}]
+            messages=[{"role": "user", "content": prompt}]
         )
         
         response_text = message.content[0].text
         
-        # Extract SQL from response
+        # Extract SQL
         import re
         sql_match = re.search(r'<sql>(.*?)</sql>', response_text, re.DOTALL)
         
         if sql_match:
             sql_query = sql_match.group(1).strip()
             
-            # Execute the query
+            # Execute query
             results = query_database(sql_query)
             
-            if results:
-                # Send results back to Claude for analysis
-                message2 = client.messages.create(
+            if results and len(results) > 0:
+                # Format results for Claude
+                results_text = f"Query returned {len(results)} rows:\n"
+                for i, row in enumerate(results[:50]):  # Limit to 50 rows
+                    results_text += f"{row}\n"
+                
+                # Get analysis from Claude
+                analysis_message = client.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=1000,
-                    system=system_prompt,
+                    system="You are a Revenue Operations analyst. Analyze data and provide executive insights. Be concise and actionable.",
                     messages=[
-                        {"role": "user", "content": f"Question: {prompt}\n\nGenerate a SQL query to answer this."},
-                        {"role": "assistant", "content": response_text},
-                        {"role": "user", "content": f"Query results:\n{results[:20]}\n\nAnalyze these results and provide business insights."}
+                        {"role": "user", "content": f"Question: {prompt}\n\nData:\n{results_text}\n\nProvide business insights and recommendations. Do NOT show SQL or technical details."}
                     ]
                 )
                 
-                return message2.content[0].text
+                return analysis_message.content[0].text
             else:
-                return "❌ Query returned no results. Try rephrasing your question."
+                return "❌ No data found. Try rephrasing your question."
         else:
-            # No SQL generated, return Claude's direct response
+            # No SQL needed, direct response
             return response_text
         
     except Exception as e:
@@ -378,37 +381,53 @@ if len(st.session_state.messages) == 0:
     with col2:
         st.markdown("### 👋 Hey, I'm Carlos Gonzalez")
         st.markdown("**Your next Revenue Operations Analyst**")
-        st.markdown("I built this AI-powered chatbot to show you what I can do. Ask me anything about the sales pipeline data below!")
+        
+        # Different intro based on mode
+        if st.session_state.demo_mode:
+            st.markdown("I built this AI-powered chatbot to show you what I can do. **Demo Mode** queries a real database of 8,800+ B2B deals with pre-built analytics.")
+        else:
+            st.markdown("**Live Mode unlocked!** You're now using Claude AI with direct database access. Ask me *any* complex ad-hoc question - I'll write SQL queries on the fly and provide executive-level analysis. Same real data (8,800+ deals), unlimited flexibility.")
     
     st.divider()
     
-    # Example questions
-    st.markdown("#### 💬 Try asking me:")
-    
-    q_col1, q_col2 = st.columns(2)
-    
-    with q_col1:
-        st.markdown("**📊 Pipeline Analysis:**")
-        st.markdown("• *What's our open pipeline value?*")
-        st.markdown("• *Show me our win rate*")
-        st.markdown("• *What's the average deal size?*")
+    # Example questions - different for each mode
+    if st.session_state.demo_mode:
+        st.markdown("#### 💬 Try asking me:")
         
-        st.markdown("**🏆 Performance:**")
-        st.markdown("• *Who are the top sales reps?*")
-        st.markdown("• *Show me product performance*")
-        st.markdown("• *How long is our sales cycle?*")
-    
-    with q_col2:
-        st.markdown("**🔮 Forecasting:**")
-        st.markdown("• *What's our revenue forecast?*")
-        st.markdown("• *Predict our pipeline conversion*")
+        q_col1, q_col2 = st.columns(2)
         
-        st.markdown("**🎮 Want to see it live?**")
-        st.markdown("Use the **Admin Panel** on the left to:")
-        st.markdown("• Close deals in bulk (10-100x)")
-        st.markdown("• Add new opportunities")
-        st.markdown("• Mark deals as lost")
-        st.markdown("*Then ask me the same question again and watch the numbers change in real-time!*")
+        with q_col1:
+            st.markdown("**📊 Pipeline Analysis:**")
+            st.markdown("• *What's our open pipeline value?*")
+            st.markdown("• *Show me our win rate*")
+            st.markdown("• *What's the average deal size?*")
+            
+            st.markdown("**🏆 Performance:**")
+            st.markdown("• *Who are the top sales reps?*")
+            st.markdown("• *Show me product performance*")
+            st.markdown("• *How long is our sales cycle?*")
+        
+        with q_col2:
+            st.markdown("**🔮 Forecasting:**")
+            st.markdown("• *What's our revenue forecast?*")
+            st.markdown("• *Predict our pipeline conversion*")
+            
+            st.markdown("**🎮 Want to see it live?**")
+            st.markdown("Use the **Admin Panel** on the left to:")
+            st.markdown("• Close deals in bulk (10-100x)")
+            st.markdown("• Add new opportunities")
+            st.markdown("• Mark deals as lost")
+            st.markdown("*Then ask me the same question again and watch the numbers change in real-time!*")
+    else:
+        st.markdown("#### 🚀 Live Mode - Ask Me Anything")
+        st.markdown("**I can handle complex questions like:**")
+        st.markdown("• *Compare the top 3 reps by efficiency - who closes faster with higher deal values?*")
+        st.markdown("• *What's our CAC and how does it compare year-over-year?*")
+        st.markdown("• *Which product has the best velocity-to-value ratio?*")
+        st.markdown("• *If our win rate dropped 10%, how would that impact our forecast?*")
+        st.markdown("• *Analyze our pipeline health and identify the biggest risks*")
+        
+        st.info("💡 **Pro tip:** The more specific your question, the better my analysis. I'm querying the same 8,800-deal database, but with AI I can answer questions that weren't pre-programmed.")
     
     st.divider()
 
@@ -457,7 +476,7 @@ with st.sidebar:
     st.divider()
     
     st.header("About This Tool")
-    st.write("Analyzes 8,800+ real B2B deals from Kaggle dataset")
+    st.write("Analyzes 8,800+ real B2B deals from [Kaggle CRM dataset](https://www.kaggle.com/datasets/innocentmfa/crm-sales-opportunities)")
     
     st.divider()
     
